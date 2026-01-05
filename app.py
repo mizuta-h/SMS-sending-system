@@ -49,6 +49,9 @@ def load_config():
             config.setdefault('send_method', 'tap')
             config.setdefault('send_button_x', 980)
             config.setdefault('send_button_y', 1850)
+            config.setdefault('max_send_count', 0)  # 0 = unlimited
+            config.setdefault('daily_sent_count', 0)
+            config.setdefault('daily_sent_date', '')
             return config
     return {
         "default_message": "This is a reminder message.",
@@ -59,7 +62,10 @@ def load_config():
         "dry_run": False,
         "send_method": "tap",
         "send_button_x": 980,
-        "send_button_y": 1850
+        "send_button_y": 1850,
+        "max_send_count": 0,
+        "daily_sent_count": 0,
+        "daily_sent_date": ""
     }
 
 
@@ -195,17 +201,49 @@ def send_all_sms(dry_run=False):
     contacts = [c for c in load_contacts() if c.get('enabled', True)]
     default_message = config.get('default_message', '')
     delay = config.get('send_delay_seconds', 5)
+    max_count = config.get('max_send_count', 0)  # 0 = unlimited
+    
+    # 今日の日付
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    # 日付が変わったらカウントリセット
+    if config.get('daily_sent_date', '') != today:
+        config['daily_sent_count'] = 0
+        config['daily_sent_date'] = today
+        save_config(config)
+    
+    daily_sent = config.get('daily_sent_count', 0)
+    
+    # 送信可能件数を計算
+    if max_count > 0:
+        remaining = max_count - daily_sent
+        if remaining <= 0:
+            send_status = {
+                "is_running": False,
+                "current": 0,
+                "total": 0,
+                "results": [],
+                "start_time": datetime.now().isoformat(),
+                "error": f"Daily limit reached ({max_count} SMS). Resets tomorrow."
+            }
+            return
+        # 送信対象を制限
+        contacts = contacts[:remaining]
     
     send_status = {
         "is_running": True,
         "current": 0,
         "total": len(contacts),
         "results": [],
-        "start_time": datetime.now().isoformat()
+        "start_time": datetime.now().isoformat(),
+        "max_count": max_count,
+        "daily_sent_before": daily_sent
     }
     
     LOG_DIR.mkdir(exist_ok=True)
     log_file = LOG_DIR / f"sms_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    
+    sent_count = 0
     
     for i, contact in enumerate(contacts):
         if not send_status["is_running"]:
@@ -228,10 +266,20 @@ def send_all_sms(dry_run=False):
         send_status["results"].append(log_entry)
         log_queue.put(log_entry)
         
+        if success:
+            sent_count += 1
+        
         if i < len(contacts) - 1 and send_status["is_running"]:
             time.sleep(delay)
     
     send_status["is_running"] = False
+    
+    # 日次カウントを更新（ドライラン以外）
+    if not dry_run:
+        config = load_config()
+        config['daily_sent_count'] = config.get('daily_sent_count', 0) + sent_count
+        config['daily_sent_date'] = today
+        save_config(config)
     
     # ログファイル保存
     with open(log_file, 'w', encoding='utf-8') as f:
@@ -555,6 +603,36 @@ def api_clear_all_logs():
         return jsonify({"success": True, "deleted": deleted})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/daily-count')
+def api_get_daily_count():
+    """今日の送信数を取得"""
+    config = load_config()
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    # 日付が変わっていたらリセット
+    if config.get('daily_sent_date', '') != today:
+        return jsonify({
+            "date": today,
+            "sent_count": 0,
+            "max_count": config.get('max_send_count', 0)
+        })
+    
+    return jsonify({
+        "date": config.get('daily_sent_date', today),
+        "sent_count": config.get('daily_sent_count', 0),
+        "max_count": config.get('max_send_count', 0)
+    })
+
+
+@app.route('/api/daily-count/reset', methods=['POST'])
+def api_reset_daily_count():
+    """今日の送信数をリセット"""
+    config = load_config()
+    config['daily_sent_count'] = 0
+    save_config(config)
+    return jsonify({"success": True})
 
 
 if __name__ == '__main__':

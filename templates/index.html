@@ -1084,6 +1084,28 @@
                     </div>
                 </div>
 
+                <!-- 日次制限カード -->
+                <div class="card" style="margin-bottom:24px; border-color:var(--accent-primary);">
+                    <div class="card-body" style="padding:16px 24px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+                            <div style="display:flex; align-items:center; gap:24px;">
+                                <div>
+                                    <span style="color:var(--text-muted); font-size:13px;">Today's Sent</span>
+                                    <div style="font-size:24px; font-weight:700;">
+                                        <span id="dailySentCount">0</span>
+                                        <span style="color:var(--text-muted); font-size:16px;">/ <span id="dailyMaxCount">∞</span></span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <span style="color:var(--text-muted); font-size:13px;">Remaining</span>
+                                    <div style="font-size:24px; font-weight:700; color:var(--success);" id="dailyRemaining">∞</div>
+                                </div>
+                            </div>
+                            <button class="btn btn-secondary btn-sm" onclick="resetDailyCount()">Reset Counter</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
                     <div class="stat-card">
                         <div class="stat-label">送信対象</div>
@@ -1233,6 +1255,12 @@
                             <label class="form-label">リトライ回数</label>
                             <input type="number" class="form-input" id="settingRetryCount" min="1" max="10" value="3">
                             <div class="form-hint">送信失敗時の再試行回数</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">1日の最大送信数</label>
+                            <input type="number" class="form-input" id="settingMaxSendCount" min="0" value="0">
+                            <div class="form-hint">0 = 無制限。キャリアの1日あたり送信上限に合わせて設定してください（例: 200）</div>
                         </div>
 
                         <div class="form-group">
@@ -1440,6 +1468,7 @@
 
             if (sectionId === 'send') {
                 updateSendStats();
+                loadDailyCount();
             }
         }
 
@@ -1550,6 +1579,52 @@
         function updateSendStats() {
             const enabled = contacts.filter(c => c.enabled).length;
             document.getElementById('sendTotal').textContent = enabled;
+        }
+
+        // 日次カウント読み込み
+        async function loadDailyCount() {
+            try {
+                const res = await fetch('/api/daily-count');
+                const data = await res.json();
+                
+                const sent = data.sent_count || 0;
+                const max = data.max_count || 0;
+                
+                document.getElementById('dailySentCount').textContent = sent;
+                
+                if (max > 0) {
+                    document.getElementById('dailyMaxCount').textContent = max;
+                    const remaining = Math.max(0, max - sent);
+                    document.getElementById('dailyRemaining').textContent = remaining;
+                    
+                    // 残り少ない場合は警告色
+                    if (remaining === 0) {
+                        document.getElementById('dailyRemaining').style.color = 'var(--danger)';
+                    } else if (remaining < max * 0.2) {
+                        document.getElementById('dailyRemaining').style.color = 'var(--warning)';
+                    } else {
+                        document.getElementById('dailyRemaining').style.color = 'var(--success)';
+                    }
+                } else {
+                    document.getElementById('dailyMaxCount').textContent = '∞';
+                    document.getElementById('dailyRemaining').textContent = '∞';
+                    document.getElementById('dailyRemaining').style.color = 'var(--success)';
+                }
+            } catch (e) {
+                console.error('Daily count load error:', e);
+            }
+        }
+
+        // 日次カウントリセット
+        async function resetDailyCount() {
+            if (!confirm('Reset today\'s send counter to 0?')) return;
+            
+            try {
+                await fetch('/api/daily-count/reset', { method: 'POST' });
+                loadDailyCount();
+            } catch (e) {
+                alert('Reset failed');
+            }
         }
 
         // 連絡先検索
@@ -1772,6 +1847,7 @@
                 document.getElementById('settingAdbPath').value = config.adb_path || '';
                 document.getElementById('settingSendDelay').value = config.send_delay_seconds || 5;
                 document.getElementById('settingRetryCount').value = config.retry_count || 3;
+                document.getElementById('settingMaxSendCount').value = config.max_send_count || 0;
                 document.getElementById('settingScheduledTime').value = config.scheduled_time || '09:00';
                 document.getElementById('settingSendMethod').value = config.send_method || 'tap';
                 document.getElementById('settingSendButtonX').value = config.send_button_x || 980;
@@ -1779,6 +1855,7 @@
 
                 toggleTapSettings();
                 updateStats();
+                loadDailyCount();
             } catch (e) {
                 console.error('Settings load error:', e);
             }
@@ -1818,6 +1895,7 @@
                 adb_path: document.getElementById('settingAdbPath').value,
                 send_delay_seconds: parseInt(document.getElementById('settingSendDelay').value),
                 retry_count: parseInt(document.getElementById('settingRetryCount').value),
+                max_send_count: parseInt(document.getElementById('settingMaxSendCount').value) || 0,
                 scheduled_time: document.getElementById('settingScheduledTime').value,
                 send_method: document.getElementById('settingSendMethod').value,
                 send_button_x: parseInt(document.getElementById('settingSendButtonX').value),
@@ -1833,6 +1911,7 @@
                 config = newConfig;
                 alert('Settings saved!');
                 updateStats();
+                loadDailyCount();
             } catch (e) {
                 alert('Save failed');
             }
@@ -1879,10 +1958,21 @@
                 const res = await fetch('/api/send/status');
                 const status = await res.json();
 
+                // エラーがある場合
+                if (status.error) {
+                    alert(status.error);
+                    document.getElementById('startBtn').style.display = 'inline-flex';
+                    document.getElementById('testBtn').style.display = 'inline-flex';
+                    document.getElementById('stopBtn').style.display = 'none';
+                    document.getElementById('progressContainer').style.display = 'none';
+                    loadDailyCount();
+                    return;
+                }
+
                 const percent = status.total > 0 ? Math.round((status.current / status.total) * 100) : 0;
                 document.getElementById('progressFill').style.width = percent + '%';
                 document.getElementById('progressPercent').textContent = percent + '%';
-                document.getElementById('progressText').textContent = `${status.current} / ${status.total} 件送信中...`;
+                document.getElementById('progressText').textContent = `${status.current} / ${status.total} sending...`;
 
                 const success = status.results.filter(r => r.success).length;
                 const failed = status.results.filter(r => !r.success).length;
@@ -1907,11 +1997,12 @@
                     document.getElementById('startBtn').style.display = 'inline-flex';
                     document.getElementById('testBtn').style.display = 'inline-flex';
                     document.getElementById('stopBtn').style.display = 'none';
-                    document.getElementById('progressText').textContent = '送信完了';
+                    document.getElementById('progressText').textContent = 'Completed';
                     loadLogs();
+                    loadDailyCount();
                 }
             } catch (e) {
-                console.error('ステータス取得エラー:', e);
+                console.error('Status error:', e);
             }
         }
 

@@ -1,7 +1,8 @@
 # SMS自動送信システム - Webダッシュボード
 
-WebインターフェースでSMS送信を管理できるWindowsアプリケーションです。
+モダンなWebインターフェースでSMS送信を管理できるWindowsアプリケーションです。
 
+![Dashboard Preview](https://via.placeholder.com/800x450/0a0a0f/6366f1?text=SMS+Dashboard)
 
 ## ✨ 特徴
 
@@ -140,8 +141,8 @@ pip install flask
 
 ## 📜 ライセンス
 
-Hiroshi Mizuta License
+MIT License
 
 ---
 
-© 2025 SMS Auto Sender System
+© 2024 SMS Auto Sender System

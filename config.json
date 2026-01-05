@@ -1,14 +1,17 @@
 {
     "adb_path": "platform-tools\\adb.exe",
     "csv_path": "contacts.csv",
+    "daily_sent_count": 1,
+    "daily_sent_date": "2026-01-05",
     "default_message": "This is a reminder message.",
     "dry_run": false,
     "log_path": "logs",
+    "max_send_count": 0,
     "retry_count": 3,
     "retry_delay_seconds": 10,
     "scheduled_time": "09:00",
-    "send_button_x": 925,
-    "send_button_y": 2218,
+    "send_button_x": 983,
+    "send_button_y": 2203,
     "send_delay_seconds": 5,
     "send_method": "tap"
 }
