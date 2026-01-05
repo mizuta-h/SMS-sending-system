@@ -152,8 +152,6 @@ pip install flask
 
 ## 📜 ライセンス
 
-MIT License
-
----
-
 © 2026 SMS Auto Sender System
+Released under the MIT licenseReleased under the MIT license
+https://opensource.org/license/mit
